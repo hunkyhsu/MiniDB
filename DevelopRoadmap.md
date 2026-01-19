@@ -1,0 +1,346 @@
+# MiniDB 落地开发路线图
+
+存储引擎层
+
+- Page 元数据管理 (FreeSpaceMap,跟踪哪些 Page 有空闲空间)
+- Tuple 删除标记 (Slotted Page 中的 Deleted Slot 处理)
+
+数据访问层
+
+- NULL 值支持 (Null Bitmap)
+- 主键唯一性检查
+- 表达式求值系统 (Expression Evaluator)
+
+事务层
+
+- Undo Log 格式定义
+- 死锁检测机制选择 (超时 vs 依赖图)
+
+SQL 接口层
+
+- 会话管理 (Session Manager)
+- 连接池 (Connection Pool)
+- 错误码系统 (MySQL-like Error Codes)
+
+  ---                                                                                                                                                                      
+🎯 总结与建议优先级
+
+🔴 必须立即添加 (P0):
+
+1. 表达式求值系统 (否则 WHERE 和 SELECT 无法工作)
+2. NULL 值处理 (Tuple 存储格式必须支持)
+3. 主键唯一性检查 (否则数据完整性无法保证)
+4. 日志记录格式定义 (阶段三开始前必须明确)
+
+🟡 强烈建议添加 (P1):
+
+5. Session 与连接管理 (多客户端场景必需)
+6. 异常体系设计 (提高代码健壮性)
+7. Undo/Redo 策略选择 (影响恢复逻辑)
+
+🟢 可以后续完善 (P2):
+
+8. AUTO_INCREMENT 支持 (用户体验优化)
+9. 性能监控埋点 (便于调试)
+10. Schema Evolution 预留 (长期扩展性)
+
+
+## 阶段一：磁盘与内存管家 (Storage Engine Foundation)
+
+**目标：** 实现 Page、DiskManager 和 BufferPool。
+
+**核心逻辑：** 不考虑 SQL，只考虑如何把"字节"存在磁盘，并缓存在内存。
+
+### 1. 任务指标
+- 定义 Page 结构：固定大小 4KB（4096 字节）
+- 实现 DiskManager：负责随机读写文件中的某个 Page
+- 实现 BufferPoolManager：管理内存中的 Page 数组，实现 LRU 替换算法
+- **【新增】实现类型系统（Type System）：**
+  - 定义 `Type` 接口：`serializeToBytes()` 和 `deserializeFromBytes()`
+  - 实现基础类型：`IntegerType`（4字节）、`VarcharType`（变长）、`DateType`（8字节）
+  - 实现 `Value` 类：封装具体的数据值
+  - 实现 `Schema` 类：描述一行数据的列定义（列名、类型、是否可空）
+
+### 2. 验收标准
+- **代码表现：** 你能通过 `bufferPool.fetchPage(pageId)` 获取一个页面，修改它，并看到它被自动刷回磁盘文件
+- **持久化检查：** 程序关闭后，磁盘上的 .db 文件大小是 4KB 的整数倍
+
+### 3. 验收步骤（可见结果）
+1. 编写一个测试类，向 BufferPool 请求 Page 0
+2. 在 Page 0 的第 100 字节写入字符串 "Hello MiniDB"
+3. 调用 `bufferPool.unpinPage(0, true)`（标记为脏页）
+4. 强制关闭程序，查看磁盘文件
+5. **验证：** 再次运行程序，读取 Page 0，能正确输出 "Hello MiniDB"
+
+---
+
+## 阶段二：数据行与简单的扫描器 (Tuple & Scan)
+
+**目标：** 在 Page 内部实现"行"的存储。
+
+**核心逻辑：** 一个 Page 里面怎么放多条记录？你需要实现 Slotted Page 结构。
+
+### 1. 任务指标
+- 实现 Tuple（元组/行）对象
+- 实现 TableHeap：管理多个 Page 组成的逻辑表
+- 实现 SeqScan：能够从头到尾迭代一个表的所有行
+- **【新增】实现 Schema 管理与元数据系统：**
+  - 实现 `Catalog`（系统目录）：管理所有表的元数据
+  - 实现 `TableMetadata`：存储表名、表 ID、根页面 ID
+  - 实现 `ColumnMetadata`：存储列定义（列名、类型、约束）
+  - 创建系统表：`minidb_tables` 和 `minidb_columns`，用于持久化元数据
+  - 支持元数据的序列化和反序列化
+- **【新增】实现 B+Tree 索引（主键索引）：**
+  - 实现 `BPlusTree` 类：支持 insert、search、delete 操作
+  - 实现 `BPlusTreePage`：内部节点和叶子节点
+  - 实现 `IndexScan`：通过索引快速定位记录
+  - 为每张表的主键自动创建索引
+
+### 2. 验收标准
+- **代码表现：** 可以插入 1000 条记录，并能通过 Iterator 遍历出来
+- **溢出处理：** 插入记录超过 4KB 时，系统能自动创建 Page 1, Page 2
+
+### 3. 验收步骤（可见结果）
+1. 循环插入 100 条格式为 `(int id, string name)` 的模拟数据
+2. 编写一个 for 循环，调用 `tableHeap.iterator()`
+3. **验证：** 控制台打印出 100 行数据，且 ID 连续
+
+---
+
+## 阶段三：事务、日志与并发 (ACID & Concurrency)
+
+**目标：** 实现 WAL 日志和 LockManager（这是最难的）。
+
+**核心逻辑：** 引入事务 ID，确保修改前先写日志。
+
+### 1. 任务指标
+- 实现 LogManager：顺序追加日志到 .log 文件
+- 实现 LockManager：实现一个 Map，记录哪个 TxID 锁住了哪个 Rid (Record ID)
+- 实现 RecoveryManager：模拟程序崩溃，重启后根据日志恢复 BufferPool
+- **【新增】实现 TransactionManager（事务管理器）：**
+  - 分配唯一的事务 ID (TxID)
+  - 管理事务状态：Running、Committed、Aborted
+  - 实现事务的 Begin、Commit、Rollback 接口
+- **【新增】实现 Checkpoint 机制：**
+  - 实现 `CheckpointManager`：定期将 BufferPool 中的脏页刷盘
+  - 在日志中记录 Checkpoint 位置（LSN）
+  - 恢复时从最近的 Checkpoint 开始，避免回放所有日志
+- **【新增】实现隔离级别（READ COMMITTED）：**
+  - 读操作获取共享锁（S-Lock），读完立即释放
+  - 写操作获取排他锁（X-Lock），事务提交时释放
+  - 实现死锁检测：超时机制或依赖图检测
+
+### 2. 验收标准
+- **原子性：** 事务 Rollback 后，内存和磁盘的数据必须变回原样
+- **并发性：** 两个线程同时改两行不同的数据，互不干扰；改同一行，必须排队
+
+### 3. 验收步骤（可见结果）
+1. 开启事务 A，修改 ID=1 的数据
+2. 在事务 A 提交前，开启事务 B 修改 ID=1
+3. **验证：** 观察日志，事务 B 必须处于等待状态（Block）
+4. 杀掉进程，删除 .db 文件中未提交的部分，重启
+5. **验证：** 数据恢复到修改前的状态
+
+---
+
+## 阶段三点五：查询执行引擎 (Execution Engine)
+
+**目标：** 实现火山模型执行器框架，支持 SQL 语句的执行。
+
+**核心逻辑：** 将 SQL 语句转换为执行计划树，通过迭代器模式执行查询。
+
+### 1. 任务指标
+- **实现 Executor 接口（火山模型）：**
+  - 定义 `Executor` 接口：`init()`、`next()`、`close()` 方法
+  - 每次调用 `next()` 返回一条 Tuple，无结果时返回 null
+- **实现基础执行器：**
+  - `SeqScanExecutor`：全表顺序扫描
+  - `IndexScanExecutor`：通过索引扫描（使用 B+Tree）
+  - `FilterExecutor`：WHERE 条件过滤
+  - `ProjectionExecutor`：SELECT 列投影（选择指定列）
+- **实现修改操作执行器：**
+  - `InsertExecutor`：执行 INSERT 语句
+  - `UpdateExecutor`：执行 UPDATE 语句
+  - `DeleteExecutor`：执行 DELETE 语句
+- **实现 Planner（查询计划器）：**
+  - 将解析后的 SQL（JSqlParser 输出）转换为执行计划树
+  - 简单的优化：如果 WHERE 条件包含主键，使用 IndexScan 而非 SeqScan
+
+### 2. 验收标准
+- **查询执行：** 能够执行 `SELECT * FROM user WHERE id > 10;`，并正确过滤结果
+- **修改执行：** 能够执行 `UPDATE user SET name = 'new' WHERE id = 1;`
+- **删除执行：** 能够执行 `DELETE FROM user WHERE id = 5;`
+- **执行器组合：** 能够构建执行器树，例如：Projection -> Filter -> SeqScan
+
+### 3. 验收步骤（可见结果）
+1. 插入 10 条测试数据：`INSERT INTO user VALUES (1, 'a'), (2, 'b'), ..., (10, 'j');`
+2. 执行查询：`SELECT id, name FROM user WHERE id > 5;`
+3. **验证：** 返回 5 条记录（id = 6, 7, 8, 9, 10）
+4. 执行更新：`UPDATE user SET name = 'updated' WHERE id = 3;`
+5. **验证：** 查询 id=3 的记录，name 字段已更新为 'updated'
+6. 执行删除：`DELETE FROM user WHERE id = 7;`
+7. **验证：** 查询所有记录，id=7 的记录已被删除
+
+---
+
+## 阶段四：SQL 接口与网络门户 (SQL & Network)
+
+**目标：** 让用户通过网络点菜。
+
+**核心逻辑：** 集成 Netty 和 JSqlParser，将 SQL 映射为阶段二的 Executor。
+
+### 1. 任务指标
+- 实现 NettyServer：监听 8888 端口
+- 集成 JSqlParser：解析 INSERT、SELECT、UPDATE、DELETE
+- **【完善】扩展 Catalog 功能：**
+  - 不仅记录表的起始页，还要管理完整的 Schema 信息
+  - 支持 `CREATE TABLE` 和 `DROP TABLE` 语句
+  - 元数据持久化到系统表（`minidb_tables` 和 `minidb_columns`）
+- **【新增】实现通信协议（Protocol Handler）：**
+  - 定义请求格式：`[SQL长度(4字节)][SQL字符串]`
+  - 定义响应格式：`[状态码(1字节)][行数(4字节)][Schema信息][行数据]`
+  - 实现结果集序列化：将 Tuple 列表格式化为字节流
+  - 支持错误码返回（语法错误、执行错误等）
+- **【新增】实现 Result Formatter（结果格式化器）：**
+  - 将查询结果格式化为表格形式（类似 MySQL 客户端）
+  - 支持列对齐、边框绘制
+  - 显示查询耗时和影响行数
+
+### 2. 验收标准
+- **交互性：** 使用 Telnet 或命令行客户端连接，输入 SQL 得到结果
+- **DDL 支持：** 能够执行 `CREATE TABLE` 创建表，`DROP TABLE` 删除表
+- **完整的 CRUD：** 支持 INSERT、SELECT、UPDATE、DELETE 四种操作
+- **错误处理：** 语法错误或执行错误能返回清晰的错误信息
+
+### 3. 验收步骤（可见结果）
+1. 启动 MiniDBApplication
+2. 打开终端执行：`telnet localhost 8888`
+3. 创建表：`CREATE TABLE user (id INT PRIMARY KEY, name VARCHAR(50));`
+4. **验证：** 返回 "Table created successfully"
+5. 插入数据：`INSERT INTO user VALUES (1, 'arch');`
+6. **验证：** 返回 "1 row inserted"
+7. 查询数据：`SELECT * FROM user;`
+8. **验证：** 终端屏幕弹出格式化的数据表格：
+   ```
+   +----+------+
+   | id | name |
+   +----+------+
+   |  1 | arch |
+   +----+------+
+   1 row in set (0.05 sec)
+   ```
+9. 更新数据：`UPDATE user SET name = 'newname' WHERE id = 1;`
+10. **验证：** 返回 "1 row updated"
+11. 删除数据：`DELETE FROM user WHERE id = 1;`
+12. **验证：** 返回 "1 row deleted"
+13. 删除表：`DROP TABLE user;`
+14. **验证：** 返回 "Table dropped successfully"
+
+---
+
+## 附录：MVP 功能检查清单
+
+### ✅ 必须实现的核心功能
+
+#### 存储引擎层
+- [x] Page 结构定义（4KB）
+- [x] DiskManager（磁盘读写）
+- [x] BufferPoolManager（LRU 缓存）
+- [x] 类型系统（Type、Value、Schema）
+
+#### 数据访问层
+- [x] Tuple（行对象）
+- [x] Slotted Page（槽页结构）
+- [x] TableHeap（表堆管理）
+- [x] SeqScan（顺序扫描）
+- [x] B+Tree 主键索引
+- [x] IndexScan（索引扫描）
+- [x] Catalog（系统目录）
+- [x] 元数据持久化
+
+#### 事务层
+- [x] TransactionManager（事务管理）
+- [x] LogManager（WAL 日志）
+- [x] LockManager（锁管理）
+- [x] RecoveryManager（崩溃恢复）
+- [x] CheckpointManager（检查点）
+- [x] READ COMMITTED 隔离级别
+- [x] 死锁检测
+
+#### 执行引擎层
+- [x] Executor 接口（火山模型）
+- [x] SeqScanExecutor
+- [x] IndexScanExecutor
+- [x] FilterExecutor
+- [x] ProjectionExecutor
+- [x] InsertExecutor
+- [x] UpdateExecutor
+- [x] DeleteExecutor
+- [x] Planner（查询计划器）
+
+#### SQL 接口层
+- [x] NettyServer（网络服务）
+- [x] JSqlParser（SQL 解析）
+- [x] Protocol Handler（通信协议）
+- [x] Result Formatter（结果格式化）
+- [x] CREATE TABLE / DROP TABLE
+- [x] INSERT / SELECT / UPDATE / DELETE
+
+### ❌ MVP 暂不实现的高级特性
+
+- [ ] JOIN 操作（INNER JOIN、LEFT JOIN 等）
+- [ ] 子查询（Subquery）
+- [ ] 聚合函数（COUNT、SUM、AVG、GROUP BY、HAVING）
+- [ ] 排序（ORDER BY）
+- [ ] 分页（LIMIT、OFFSET）
+- [ ] 视图（VIEW）
+- [ ] 存储过程（Stored Procedure）
+- [ ] 触发器（Trigger）
+- [ ] 外键约束（Foreign Key）
+- [ ] MVCC（多版本并发控制）
+- [ ] 查询优化器（基于代价的优化）
+- [ ] 统计信息收集
+- [ ] 二级索引（非主键索引）
+- [ ] 全文索引
+- [ ] 分布式支持
+
+---
+
+## 开发建议
+
+### 1. 开发顺序
+建议严格按照阶段顺序开发，每个阶段完成后进行充分测试再进入下一阶段。
+
+### 2. 测试策略
+- **单元测试：** 每个核心类都编写单元测试，覆盖率 > 80%
+- **集成测试：** 每个阶段完成后进行端到端测试
+- **性能测试：** 最后阶段进行压力测试，目标 1000+ TPS
+
+### 3. 代码组织
+参考 `architecture.md` 中的包结构建议，保持清晰的分层架构。
+
+### 4. 文档记录
+- 记录关键设计决策
+- 记录遇到的问题和解决方案
+- 记录性能瓶颈和优化思路
+
+### 5. 参考资料
+- CMU 15-445 Database Systems 课程
+- 《数据库系统实现》（Database System Implementation）
+- 《事务处理：概念与技术》（Transaction Processing）
+- SQLite、Derby、BusTub 等开源项目
+
+---
+
+## 总结
+
+完成以上所有阶段后，你将拥有一个功能完整的 MVP 级别的 MySQL-like 数据库系统，具备：
+
+✅ **完整的存储引擎**：支持数据持久化和缓存管理
+✅ **ACID 事务支持**：保证数据一致性和可靠性
+✅ **并发控制**：支持多线程并发访问
+✅ **崩溃恢复**：程序崩溃后能自动恢复数据
+✅ **SQL 接口**：支持通过网络执行 SQL 语句
+✅ **索引加速**：通过 B+Tree 索引提升查询性能
+
+这是一个可以实际运行、演示和扩展的数据库系统，为后续添加更多高级特性打下了坚实的基础。

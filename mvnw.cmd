@@ -149,7 +149,7 @@ if ($distributionSha256Sum) {
 # unzip and move
 Expand-Archive "$TMP_DOWNLOAD_DIR/$distributionUrlName" -DestinationPath "$TMP_DOWNLOAD_DIR" | Out-Null
 
-# Find the actual extracted directory name (handles snapshots where filename != directory name)
+# Find the actual extracted directory name (handles snapshots where dbFilePath != directory name)
 $actualDistributionDir = ""
 
 # First try the expected directory name (for regular distributions)
