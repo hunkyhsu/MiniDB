@@ -1,109 +1,125 @@
-# MiniDB 落地开发路线图
+# MiniDB Develop Roadmap
 
-存储引擎层
+> Hunky Hsu
 
-- Page 元数据管理 (FreeSpaceMap,跟踪哪些 Page 有空闲空间)
-- Tuple 删除标记 (Slotted Page 中的 Deleted Slot 处理)
+## Content:
 
-数据访问层
+- Stage 1: Storage Engine
+- Stage 2: Tuple & Scan
+- Stage 3: Type system & Catalog
+- Stage 4: Query Execution Engine & Volcano Model
+- Stage 5: Concurrency & Recovery
+- Stage 6: SQL Parser & SQL Interface
 
-- NULL 值支持 (Null Bitmap)
-- 主键唯一性检查
-- 表达式求值系统 (Expression Evaluator)
+## Stage 1：Storage Engine Foundation
 
-事务层
-
-- Undo Log 格式定义
-- 死锁检测机制选择 (超时 vs 依赖图)
-
-SQL 接口层
-
-- 会话管理 (Session Manager)
-- 连接池 (Connection Pool)
-- 错误码系统 (MySQL-like Error Codes)
-
-  ---                                                                                                                                                                      
-🎯 总结与建议优先级
-
-🔴 必须立即添加 (P0):
-
-1. 表达式求值系统 (否则 WHERE 和 SELECT 无法工作)
-2. NULL 值处理 (Tuple 存储格式必须支持)
-3. 主键唯一性检查 (否则数据完整性无法保证)
-4. 日志记录格式定义 (阶段三开始前必须明确)
-
-🟡 强烈建议添加 (P1):
-
-5. Session 与连接管理 (多客户端场景必需)
-6. 异常体系设计 (提高代码健壮性)
-7. Undo/Redo 策略选择 (影响恢复逻辑)
-
-🟢 可以后续完善 (P2):
-
-8. AUTO_INCREMENT 支持 (用户体验优化)
-9. 性能监控埋点 (便于调试)
-10. Schema Evolution 预留 (长期扩展性)
-
-
-## 阶段一：磁盘与内存管家 (Storage Engine Foundation)
-
-**目标：** 实现 Page、DiskManager 和 BufferPool。
-
-**核心逻辑：** 不考虑 SQL，只考虑如何把"字节"存在磁盘，并缓存在内存。
+**目标**：实现 Page、DiskManager 和 BufferPool。 **核心逻辑**：不考虑 SQL，只考虑如何把“字节”存在磁盘，并缓存在内存。
 
 ### 1. 任务指标
-- 定义 Page 结构：固定大小 4KB（4096 字节）
-- 实现 DiskManager：负责随机读写文件中的某个 Page
-- 实现 BufferPoolManager：管理内存中的 Page 数组，实现 LRU 替换算法
-- **【新增】实现类型系统（Type System）：**
-  - 定义 `Type` 接口：`serializeToBytes()` 和 `deserializeFromBytes()`
-  - 实现基础类型：`IntegerType`（4字节）、`VarcharType`（变长）、`DateType`（8字节）
-  - 实现 `Value` 类：封装具体的数据值
-  - 实现 `Schema` 类：描述一行数据的列定义（列名、类型、是否可空）
+
+- 定义 `Page` 结构：固定大小 4KB（4096 字节）。
+- 实现 `DiskManager`：负责随机读写文件中的某个 Page。
+- 实现 `BufferPoolManager`：管理内存中的 Page 数组，实现 LRU 替换算法。
 
 ### 2. 验收标准
-- **代码表现：** 你能通过 `bufferPool.fetchPage(pageId)` 获取一个页面，修改它，并看到它被自动刷回磁盘文件
-- **持久化检查：** 程序关闭后，磁盘上的 .db 文件大小是 4KB 的整数倍
 
-### 3. 验收步骤（可见结果）
-1. 编写一个测试类，向 BufferPool 请求 Page 0
-2. 在 Page 0 的第 100 字节写入字符串 "Hello MiniDB"
-3. 调用 `bufferPool.unpinPage(0, true)`（标记为脏页）
-4. 强制关闭程序，查看磁盘文件
-5. **验证：** 再次运行程序，读取 Page 0，能正确输出 "Hello MiniDB"
+- **代码表现**：你能通过 `bufferPool.fetchPage(pageId)` 获取一个页面，修改它，并看到它被自动刷回磁盘文件。
+- **持久化检查**：程序关闭后，磁盘上的 `.db` 文件大小是 4KB 的整数倍。
+
+### 3. 验收步骤 (可见结果)
+
+1. 编写一个测试类，向 `BufferPool` 请求 `Page 0`。
+2. 在 `Page 0` 的第 100 字节写入字符串 `"Hello MiniDB"`。
+3. 调用 `bufferPool.unpinPage(0, true)`（标记为脏页）。
+4. 强制关闭程序，查看磁盘文件。
+5. **验证**：再次运行程序，读取 `Page 0`，能正确输出 `"Hello MiniDB"`。
 
 ---
 
-## 阶段二：数据行与简单的扫描器 (Tuple & Scan)
+## Stage 2：数据行与简单的扫描器 (Tuple & Scan)
 
-**目标：** 在 Page 内部实现"行"的存储。
+![image-20260121184359446](/Users/hunkyhsu/Library/Application Support/typora-user-images/image-20260121184359446.png)
 
-**核心逻辑：** 一个 Page 里面怎么放多条记录？你需要实现 Slotted Page 结构。
+**目标**：在 4KB 的 Page 上构建一套数据结构，使其能存储变长的行记录（Tuple），并支持增删改查。
 
-### 1. 任务指标
-- 实现 Tuple（元组/行）对象
-- 实现 TableHeap：管理多个 Page 组成的逻辑表
-- 实现 SeqScan：能够从头到尾迭代一个表的所有行
-- **【新增】实现 Schema 管理与元数据系统：**
-  - 实现 `Catalog`（系统目录）：管理所有表的元数据
-  - 实现 `TableMetadata`：存储表名、表 ID、根页面 ID
-  - 实现 `ColumnMetadata`：存储列定义（列名、类型、约束）
-  - 创建系统表：`minidb_tables` 和 `minidb_columns`，用于持久化元数据
-  - 支持元数据的序列化和反序列化
-- **【新增】实现 B+Tree 索引（主键索引）：**
-  - 实现 `BPlusTree` 类：支持 insert、search、delete 操作
-  - 实现 `BPlusTreePage`：内部节点和叶子节点
-  - 实现 `IndexScan`：通过索引快速定位记录
-  - 为每张表的主键自动创建索引
+### 1. 核心概念：Slotted Page (槽位页)
 
-### 2. 验收标准
-- **代码表现：** 可以插入 1000 条记录，并能通过 Iterator 遍历出来
-- **溢出处理：** 插入记录超过 4KB 时，系统能自动创建 Page 1, Page 2
+我们不能简单地把数据一行行挨着写，因为如果删除了中间的一行，会留下空洞。**Slotted Page** 是解决这个问题的标准方案。
 
-### 3. 验收步骤（可见结果）
-1. 循环插入 100 条格式为 `(int id, string name)` 的模拟数据
-2. 编写一个 for 循环，调用 `tableHeap.iterator()`
-3. **验证：** 控制台打印出 100 行数据，且 ID 连续
+#### 1.1 页面布局 (Page Layout)
+
+一个 4KB 的 `TablePage` 结构如下：
+
+```
++----------------+-----------------------------------------------------------+
+|  Header (页头)  |  Free Space (空闲空间)  <-- 动态伸缩 -->  Tuples (数据区)   |
++----------------+-----------------------------------------------------------+
+^                ^                       ^                  ^                ^
+0                24 bytes               Gap End            Gap Start        4096
+```
+
+1. **Header (固定大小)**:
+   - `PageId` (4B)
+   - `PrevPageId` (4B): 双向链表，指向前一个数据页。
+   - `NextPageId` (4B): 双向链表，指向后一个数据页。
+   - `FreeSpacePointer` (4B): 指向数据区空闲空间的**起始偏移量**（即 Gap End 的位置）。初始值是 4096。
+   - `TupleCount` (4B): 当前页有多少个 Tuple（包括被标记删除的）。
+2. **Slots (槽位区, 从 Header 之后开始)**:
+   - 这是一个数组，每个 Slot 占用 4 字节（或 8 字节）。
+   - **Slot 结构**: `[Offset (2B), Size (2B)]`。
+   - `Slot[0]` 指向第一个 Tuple 的偏移量和长度，`Slot[1]` 指向第二个，以此类推。
+   - 数组从前往后增长。
+3. **Tuples (数据区, 从 Page 末尾向前增长)**:
+   - 实际的数据内容。
+   - 插入 Tuple 1 时，数据写在 `[4096 - len1, 4096]`。
+   - 插入 Tuple 2 时，数据写在 `[4096 - len1 - len2, 4096 - len1]`。
+   - 数组从后往前增长。
+
+**关键点**：当 `Slots` 数组的末尾 和 `Tuples` 数据的头部 相遇时，页面就满了。
+
+### 2. 数据行 (Tuple) 的格式
+
+Tuple 是数据库中的一行记录。它在内存中是一个对象，但在磁盘上就是一串字节。
+
+#### 2.1 序列化格式 (Serialization)
+
+为了简单起见，我们假设表结构目前只支持固定模式（例如：`int id, varchar name`）。但为了通用性，Tuple 自身应该只是一堆字节。
+
+**存储格式**:
+
+```
+[Data Bytes ...]
+```
+
+- MiniDB 的 Stage 2 暂时不需要复杂的 Schema 解析（Catalog），我们可以先硬编码测试，或者简单地存储纯字节流。
+- **注意**：在 Stage 2，我们主要关注 **Tuple 的存储管理**，而不是 Tuple 内部字段的解析。
+
+### 3. 核心组件设计
+
+#### 3.1 TablePage (extends Page)
+
+- **职责**：将通用的 `Page` (byte[]) 包装成有结构的 `TablePage`。
+- **核心方法**:
+  - `insertTuple(Tuple tuple)`: 尝试在当前页插入。如果空间不够，返回 false。
+  - `getTuple(int slotId)`: 根据槽位号读取 Tuple。
+  - `markDelete(int slotId)`: 标记删除（不立即回收空间）。
+
+#### 3.2 TableHeap (堆表)
+
+- **职责**：管理一张表的所有 Page（通过双向链表连接）。
+- **逻辑**:
+  - `TableHeap` 持有 `FirstPageId`。
+  - **插入 (Insert)**: 从第一页开始找，看哪页有空位。如果都满了，调用 `BufferPool.newPage()` 创建新页，并更新链表指针 (`NextPageId`)。
+  - **扫描 (Iterator)**: 提供一个迭代器，从 FirstPage 的 Slot 0 开始，遍历到 LastPage 的最后一个 Slot。
+
+### 4. 阶段二开发步骤 (Step-by-Step)
+
+1. **Tuple 类**: 实现数据的序列化/反序列化（简单的包装类）。
+2. **TablePage 类**: 实现 Slotted Page 的布局逻辑（这是最复杂的位操作部分）。
+3. **TableHeap 类**: 实现跨页面的管理。
+4. **测试验证**: 插入 1000 条数据，遍历验证。
+
+
 
 ---
 
