@@ -1,6 +1,7 @@
 package com.hunkyhsu.minidb.tuple;
 
 import com.hunkyhsu.minidb.storage.Page;
+import com.hunkyhsu.minidb.schema.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -92,7 +93,8 @@ public class TablePage {
         return slotId;
     }
 
-    public Tuple getTuple(int slotId) {
+    public Tuple getTuple(int slotId, Schema schema) {
+        if (schema == null) {throw new IllegalArgumentException("schema is null");}
         int tupleCount = getTupleCount();
         if (slotId < 0 || slotId >= tupleCount) {return null;}
         if (isDeleted(slotId)) {return null;}
@@ -106,7 +108,7 @@ public class TablePage {
             data[i] = buffer.get(tupleOffset + i);
         }
 
-        return new Tuple(new RecordId(page.getPageId(), slotId), data);
+        return Tuple.fromBytes(schema, data, new RecordId(page.getPageId(), slotId));
     }
 
 

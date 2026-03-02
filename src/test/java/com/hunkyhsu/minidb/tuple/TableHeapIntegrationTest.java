@@ -1,7 +1,12 @@
 package com.hunkyhsu.minidb.tuple;
 
+import com.hunkyhsu.minidb.schema.Column;
+import com.hunkyhsu.minidb.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.DiskManager;
+import com.hunkyhsu.minidb.type.TypeId;
+import com.hunkyhsu.minidb.type.Value;
+import com.hunkyhsu.minidb.type.VarcharType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,7 +17,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,6 +29,7 @@ class TableHeapIntegrationTest {
     private DiskManager diskManager;
     private BufferPoolManager bufferPoolManager;
     private Path dbPath;
+    private Schema schema;
 
     @BeforeEach
     void setUp(TestInfo testInfo) throws IOException {
@@ -32,6 +37,7 @@ class TableHeapIntegrationTest {
         dbPath = tempDir.resolve(fileName);
         diskManager = new DiskManager(dbPath.toString());
         bufferPoolManager = new BufferPoolManager(2, diskManager);
+        schema = new Schema(List.of(new Column("value", new VarcharType(4096), false)));
     }
 
     @AfterEach
@@ -49,20 +55,20 @@ class TableHeapIntegrationTest {
 
     @Test
     void insertAcrossPagesAndIterate() {
-        TableHeap tableHeap = new TableHeap(bufferPoolManager);
-        byte[] dataA = bytesOfSize(3000, (byte) 'a');
-        byte[] dataB = bytesOfSize(3000, (byte) 'b');
+        TableHeap tableHeap = new TableHeap(bufferPoolManager, schema);
+        String dataA = stringOf('a', 3000);
+        String dataB = stringOf('b', 3000);
 
-        RecordId ridA = tableHeap.insertTuple(new Tuple(dataA));
-        RecordId ridB = tableHeap.insertTuple(new Tuple(dataB));
+        RecordId ridA = tableHeap.insertTuple(tupleOf(schema, dataA));
+        RecordId ridB = tableHeap.insertTuple(tupleOf(schema, dataB));
 
         assertEquals(0, ridA.getPageId());
         assertEquals(1, ridB.getPageId());
 
         Tuple fetchedA = tableHeap.getTuple(ridA);
         Tuple fetchedB = tableHeap.getTuple(ridB);
-        assertArrayEquals(dataA, fetchedA.getData());
-        assertArrayEquals(dataB, fetchedB.getData());
+        assertEquals(dataA, fetchedA.getValue(0).asVarchar());
+        assertEquals(dataB, fetchedB.getValue(0).asVarchar());
 
         List<Tuple> tuples = new ArrayList<>();
         TableIterator iterator = tableHeap.iterator();
@@ -70,16 +76,16 @@ class TableHeapIntegrationTest {
             tuples.add(iterator.next());
         }
         assertEquals(2, tuples.size());
-        assertArrayEquals(dataA, tuples.get(0).getData());
-        assertArrayEquals(dataB, tuples.get(1).getData());
+        assertEquals(dataA, tuples.get(0).getValue(0).asVarchar());
+        assertEquals(dataB, tuples.get(1).getValue(0).asVarchar());
     }
 
     @Test
     void markDeletedIsNotVisibleAndPersists() throws IOException {
-        TableHeap tableHeap = new TableHeap(bufferPoolManager);
-        RecordId ridA = tableHeap.insertTuple(new Tuple(bytesOfSize(100, (byte) 'a')));
-        RecordId ridB = tableHeap.insertTuple(new Tuple(bytesOfSize(100, (byte) 'b')));
-        RecordId ridC = tableHeap.insertTuple(new Tuple(bytesOfSize(100, (byte) 'c')));
+        TableHeap tableHeap = new TableHeap(bufferPoolManager, schema);
+        RecordId ridA = tableHeap.insertTuple(tupleOf(schema, stringOf('a', 100)));
+        RecordId ridB = tableHeap.insertTuple(tupleOf(schema, stringOf('b', 100)));
+        RecordId ridC = tableHeap.insertTuple(tupleOf(schema, stringOf('c', 100)));
 
         assertTrue(tableHeap.markDeleted(ridB));
 
@@ -89,8 +95,8 @@ class TableHeapIntegrationTest {
             tuples.add(iterator.next());
         }
         assertEquals(2, tuples.size());
-        assertArrayEquals(bytesOfSize(100, (byte) 'a'), tuples.get(0).getData());
-        assertArrayEquals(bytesOfSize(100, (byte) 'c'), tuples.get(1).getData());
+        assertEquals(stringOf('a', 100), tuples.get(0).getValue(0).asVarchar());
+        assertEquals(stringOf('c', 100), tuples.get(1).getValue(0).asVarchar());
 
         int firstPageId = tableHeap.getFirstPageId();
         bufferPoolManager.close();
@@ -98,7 +104,7 @@ class TableHeapIntegrationTest {
 
         diskManager = new DiskManager(dbPath.toString());
         bufferPoolManager = new BufferPoolManager(2, diskManager);
-        tableHeap = new TableHeap(bufferPoolManager, firstPageId);
+        tableHeap = new TableHeap(bufferPoolManager, schema, firstPageId);
 
         assertNotNull(tableHeap.getTuple(ridA));
         assertNull(tableHeap.getTuple(ridB));
@@ -107,9 +113,9 @@ class TableHeapIntegrationTest {
 
     @Test
     void updatePersistsAfterReopen() throws IOException {
-        TableHeap tableHeap = new TableHeap(bufferPoolManager);
-        RecordId rid = tableHeap.insertTuple(new Tuple(bytesOfSize(200, (byte) 'x')));
-        Tuple updated = new Tuple(bytesOfSize(50, (byte) 'z'));
+        TableHeap tableHeap = new TableHeap(bufferPoolManager, schema);
+        RecordId rid = tableHeap.insertTuple(tupleOf(schema, stringOf('x', 200)));
+        Tuple updated = tupleOf(schema, stringOf('z', 50));
         assertTrue(tableHeap.updateTuple(rid, updated));
 
         int firstPageId = tableHeap.getFirstPageId();
@@ -118,27 +124,34 @@ class TableHeapIntegrationTest {
 
         diskManager = new DiskManager(dbPath.toString());
         bufferPoolManager = new BufferPoolManager(2, diskManager);
-        tableHeap = new TableHeap(bufferPoolManager, firstPageId);
+        tableHeap = new TableHeap(bufferPoolManager, schema, firstPageId);
 
         Tuple fetched = tableHeap.getTuple(rid);
         assertNotNull(fetched);
-        assertArrayEquals(updated.getData(), fetched.getData());
+        assertEquals(updated.getValue(0).asVarchar(), fetched.getValue(0).asVarchar());
     }
 
     @Test
     void deleteDoesNotReuseSlotWithinPage() {
-        TableHeap tableHeap = new TableHeap(bufferPoolManager);
-        RecordId ridA = tableHeap.insertTuple(new Tuple(bytesOfSize(50, (byte) 'm')));
+        TableHeap tableHeap = new TableHeap(bufferPoolManager, schema);
+        RecordId ridA = tableHeap.insertTuple(tupleOf(schema, stringOf('m', 50)));
         assertTrue(tableHeap.markDeleted(ridA));
 
-        RecordId ridB = tableHeap.insertTuple(new Tuple(bytesOfSize(50, (byte) 'n')));
+        RecordId ridB = tableHeap.insertTuple(tupleOf(schema, stringOf('n', 50)));
         assertEquals(ridA.getPageId(), ridB.getPageId());
         assertEquals(ridA.getSlotId() + 1, ridB.getSlotId());
     }
 
-    private static byte[] bytesOfSize(int size, byte fill) {
-        byte[] data = new byte[size];
-        Arrays.fill(data, fill);
-        return data;
+    private static Tuple tupleOf(Schema schema, String value) {
+        Value v = value == null ? Value.nullValue(TypeId.VARCHAR) : Value.ofVarchar(value);
+        return new Tuple(schema, new Value[]{v});
+    }
+
+    private static String stringOf(char ch, int size) {
+        char[] data = new char[size];
+        for (int i = 0; i < size; i++) {
+            data[i] = ch;
+        }
+        return new String(data);
     }
 }

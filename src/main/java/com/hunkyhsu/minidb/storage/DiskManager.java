@@ -10,6 +10,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -30,13 +32,13 @@ public class DiskManager implements Closeable {
     static {
         // 初始化空 Page Buffer（全 0）
         EMPTY_PAGE_BUFFER = ByteBuffer.allocateDirect(Page.PAGE_SIZE);
-        // DirectBuffer 默认就是全 0，无需额外填充
-        logger.info("Initialized static EMPTY_PAGE_BUFFER ({} bytes)", Page.PAGE_SIZE);
     }
 
     private final FileChannel fileChannel;
     private final Path dbFilePath;
     private final AtomicInteger numPages;
+    private static final int EXTENT_SIZE = 8;
+    private final Set<Integer> freePages = ConcurrentHashMap.newKeySet();
 
     public DiskManager(String dbFilePath) throws IOException {
         this.dbFilePath = Path.of(dbFilePath);
@@ -121,16 +123,27 @@ public class DiskManager implements Closeable {
 
     // TODO: Upgrade to Extent-Based Allocation
     public int allocatePage() throws IOException {
+        Integer freePage = freePages.stream().findFirst().orElse(null);
+        if (freePage != null) {
+            freePages.remove(freePage);
+            logger.debug("Reused Free Page {}", freePage);
+            return freePage;
+        }
+        if (hasPreallocatedPages()) {
+            return getNextPreallocatePage();
+        }
         int newPageId = this.numPages.getAndIncrement();
         long offset = (long) newPageId * Page.PAGE_SIZE;
 
         ByteBuffer buffer = EMPTY_PAGE_BUFFER.slice();
         try {
+            int totalWritten = 0;
             while (buffer.hasRemaining()) {
-                int written = fileChannel.write(buffer, offset + buffer.position());
+                int written = fileChannel.write(buffer, offset + totalWritten);
                 if (written == 0) {
                     throw new IOException("Cannot write to disk, possibly full");
                 }
+                totalWritten += written;
             }
             fileChannel.force(false);
             if (logger.isDebugEnabled()) {
@@ -153,8 +166,7 @@ public class DiskManager implements Closeable {
             logger.warn("Attempted to deallocate invalid pageId: {}", pageId);
             return;
         }
-
-        // TODO: 阶段二实现 FreePageList，将 pageId 加入空闲列表
+        freePages.add(pageId);
         logger.debug("Deallocated page {} (not yet implemented)", pageId);
     }
 

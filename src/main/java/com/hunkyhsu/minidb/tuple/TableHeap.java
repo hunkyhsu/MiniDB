@@ -1,5 +1,6 @@
 package com.hunkyhsu.minidb.tuple;
 
+import com.hunkyhsu.minidb.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.Page;
 import lombok.Getter;
@@ -31,13 +32,18 @@ import java.io.IOException;
 public class TableHeap {
     private static final Logger logger = LoggerFactory.getLogger(TableHeap.class);
     private final BufferPoolManager bufferPoolManager;
+    private final Schema schema;
     @Getter
     private int firstPageId;
     @Getter
     private int lastPageId;
 
-    public TableHeap(BufferPoolManager bufferPoolManager) {
+    public TableHeap(BufferPoolManager bufferPoolManager, Schema schema) {
         this.bufferPoolManager = bufferPoolManager;
+        if (schema == null) {
+            throw new IllegalArgumentException("schema is null");
+        }
+        this.schema = schema;
         try {
             Page page = bufferPoolManager.newPage();
             this.firstPageId = page.getPageId();
@@ -52,9 +58,13 @@ public class TableHeap {
         }
     }
 
-    public TableHeap(BufferPoolManager bufferPoolManager, int firstPageId) {
+    public TableHeap(BufferPoolManager bufferPoolManager, Schema schema, int firstPageId) {
         this.firstPageId = firstPageId;
         this.bufferPoolManager = bufferPoolManager;
+        if (schema == null) {
+            throw new IllegalArgumentException("schema is null");
+        }
+        this.schema = schema;
         this.lastPageId = firstPageId;
         int currentPageId = firstPageId;
         try {
@@ -75,8 +85,11 @@ public class TableHeap {
 
 
     public RecordId insertTuple(Tuple tuple) {
-        if (tuple == null || tuple.getData() == null) {
+        if (tuple == null) {
             throw new IllegalArgumentException("tuple is null");
+        }
+        if (!schema.isCompatible(tuple.getSchema())) {
+            throw new IllegalArgumentException("tuple schema is incompatible with table schema");
         }
         try {
             Page lastPage = bufferPoolManager.fetchPage(lastPageId);
@@ -119,7 +132,7 @@ public class TableHeap {
         try {
             Page page = bufferPoolManager.fetchPage(recordId.getPageId());
             TablePage tablePage = new TablePage(page);
-            Tuple tuple = tablePage.getTuple(recordId.getSlotId());
+            Tuple tuple = tablePage.getTuple(recordId.getSlotId(), schema);
             bufferPoolManager.unpinPage(recordId.getPageId(), false);
             return tuple;
         } catch (IOException e) {
@@ -144,6 +157,9 @@ public class TableHeap {
 
     public Boolean updateTuple(RecordId recordId, Tuple newTuple) {
         if (recordId == null || newTuple == null) {return false;}
+        if (!schema.isCompatible(newTuple.getSchema())) {
+            throw new IllegalArgumentException("tuple schema is incompatible with table schema");
+        }
         try {
             Page page = bufferPoolManager.fetchPage(recordId.getPageId());
             TablePage tablePage = new TablePage(page);
@@ -157,7 +173,7 @@ public class TableHeap {
     }
 
     public TableIterator iterator() {
-        return new TableIterator(this.bufferPoolManager, this.firstPageId);
+        return new TableIterator(this.bufferPoolManager, this.firstPageId, schema);
     }
 
 }

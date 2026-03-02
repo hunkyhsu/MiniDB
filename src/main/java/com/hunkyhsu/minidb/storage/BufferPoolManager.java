@@ -48,7 +48,7 @@ public class BufferPoolManager implements Closeable {
     public Page fetchPage(int pageId) throws IOException {
         globalLock.lock();
         try {
-            // case 1. 检查 Page 是否在内存中
+            // Cache hit: page already in buffer pool
             if (pageTable.containsKey(pageId)) {
                 int frameId = pageTable.get(pageId);
                 Page page = pages[frameId];
@@ -59,7 +59,7 @@ public class BufferPoolManager implements Closeable {
                 logger.debug("Page {} hit in buffer pool (frameId={})", pageId, frameId);
                 return page;
             }
-            // case 2. Page 不在内存，需要从磁盘加载
+            // Cache miss: load page from disk
             int frameId = findVictimFrame();
             if (frameId == -1) {
                 throw new IOException("All pages are pinned, cannot allocate frame");

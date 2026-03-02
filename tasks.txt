@@ -1,0 +1,12 @@
+storage layer:
+implement FreePageList
+add HeaderPage
+fill param. validation
+
+提取重复代码为方法（半天）
+  5. 统一魔法数字为常量（半天）
+  6. 添加缓存命中率统计
+Extent-Based Allocation
+批量刷盘优化
+统一常量定义
+提取公共方法

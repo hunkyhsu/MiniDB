@@ -1,5 +1,6 @@
 package com.hunkyhsu.minidb.tuple;
 
+import com.hunkyhsu.minidb.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.Page;
 import org.slf4j.Logger;
@@ -12,13 +13,18 @@ import java.util.NoSuchElementException;
 public class TableIterator implements Iterator<Tuple> {
     private static final Logger logger = LoggerFactory.getLogger(TableIterator.class);
     private final BufferPoolManager bufferPoolManager;
+    private final Schema schema;
 
     private int currentPageId;
     private int currentSlotId;
     private Tuple nextTuple;
 
-    public TableIterator(BufferPoolManager bufferPoolManager, int firstPageId) {
+    public TableIterator(BufferPoolManager bufferPoolManager, int firstPageId, Schema schema) {
         this.bufferPoolManager = bufferPoolManager;
+        if (schema == null) {
+            throw new IllegalArgumentException("schema is null");
+        }
+        this.schema = schema;
         this.currentPageId = firstPageId;
         this.currentSlotId = 0;
         this.nextTuple = fetchNextTuple();
@@ -35,7 +41,7 @@ public class TableIterator implements Iterator<Tuple> {
 
                 // range all the slot in current page
                 while (currentSlotId < tupleCount) {
-                    Tuple tuple = tablePage.getTuple(currentSlotId);
+                    Tuple tuple = tablePage.getTuple(currentSlotId, schema);
                     currentSlotId++;
                     if (tuple != null) {
                         bufferPoolManager.unpinPage(currentPageId, false);

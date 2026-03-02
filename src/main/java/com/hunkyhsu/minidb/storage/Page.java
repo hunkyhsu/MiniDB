@@ -6,6 +6,7 @@ import lombok.Setter;
 import java.nio.ByteBuffer;
 
 @Getter
+
 public class Page {
     public static final int PAGE_SIZE = 4096; // 4kb
     @Setter
