@@ -1,7 +1,7 @@
-package com.hunkyhsu.minidb.tuple;
+package com.hunkyhsu.minidb.access.heap;
 
+import com.hunkyhsu.minidb.access.record.RecordId;
 import com.hunkyhsu.minidb.storage.Page;
-import com.hunkyhsu.minidb.schema.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,11 +41,11 @@ public class TablePage {
     private static final Logger logger = LoggerFactory.getLogger(TablePage.class);
     // Header Offset
     private static final int OFFSET_PAGE_ID = 0;
-    private static final int OFFSET_PREV_PAGE_ID = 4;
-    private static final int OFFSET_NEXT_PAGE_ID = 8;
-    private static final int OFFSET_FREE_SPACE = 12;
-    private static final int OFFSET_TUPLE_COUNT = 16;
-    private static final int HEADER_SIZE = 24; // 20 bytes data + 4 bytes LSN/Padding
+    private static final int OFFSET_FREE_SPACE = 4;
+    private static final int OFFSET_SLOT_COUNT = 6;
+    private static final int OFFSET_TUPLE_COUNT = 8;
+    private static final int OFFSET_LSN = 12;
+    private static final int HEADER_SIZE = 20;
 
     private static final int SLOT_SIZE = 4; // [offset(2B), size(2B)]
 
@@ -59,17 +59,16 @@ public class TablePage {
         ByteBuffer buffer = page.getPageData();
 
         buffer.putInt(OFFSET_PAGE_ID, pageId);
-        buffer.putInt(OFFSET_PREV_PAGE_ID, prevPageId);
-        buffer.putInt(OFFSET_NEXT_PAGE_ID, -1);
         buffer.putInt(OFFSET_FREE_SPACE, Page.PAGE_SIZE);
+        buffer.putInt(OFFSET_SLOT_COUNT, 0);
         buffer.putInt(OFFSET_TUPLE_COUNT, 0);
+        buffer.putInt(OFFSET_LSN, 0);
 
         logger.debug("Initialized Table Page: pageId={}, prevPageId={}", pageId, prevPageId);
     }
 
-    // core functions
-    public int insertTuple(Tuple tuple) {
-        if (tuple == null || tuple.getData() == null) {throw new IllegalArgumentException("tuple is null");}
+    public RecordId insertTuple(TupleDescriptor descriptor, Object[] values) {
+        if (tuple == null || tuple.getPageData() == null) {throw new IllegalArgumentException("tuple is null");}
         if (tuple.getSize() == 0) {throw new IllegalArgumentException("tuple is empty");}
         if (tuple.getSize() > Page.PAGE_SIZE - HEADER_SIZE - SLOT_SIZE) {throw new IllegalArgumentException("tuple size is too large");}
         if (getFreeSpace() < tuple.getSize() + SLOT_SIZE) {
@@ -77,7 +76,7 @@ public class TablePage {
             return -1;
         }
         ByteBuffer buffer = page.getPageData();
-        byte[] data = tuple.getData();
+        byte[] data = tuple.getPageData();
         int slotId = getTupleCount();
         int newSpaceOffset = getFreeSpacePointer() - tuple.getSize();
 
@@ -93,7 +92,7 @@ public class TablePage {
         return slotId;
     }
 
-    public Tuple getTuple(int slotId, Schema schema) {
+    public boolean getTuple(short slotId, Tuple tuple) {
         if (schema == null) {throw new IllegalArgumentException("schema is null");}
         int tupleCount = getTupleCount();
         if (slotId < 0 || slotId >= tupleCount) {return null;}
@@ -108,10 +107,8 @@ public class TablePage {
             data[i] = buffer.get(tupleOffset + i);
         }
 
-        return Tuple.fromBytes(schema, data, new RecordId(page.getPageId(), slotId));
+        return Tuple.fromBytes(schema, data, new RecordId(page.getPageId(), (short) slotId));
     }
-
-
 
     public Boolean markDeleted(int slotId) {
         int tupleCount = getTupleCount();
@@ -124,12 +121,12 @@ public class TablePage {
         return true;
     }
 
-    public Boolean updateTuple(Tuple newTuple, int slotId) {
+    public Boolean updateTuple(Tuple newTuple, short slotId) {
         int tupleCount = getTupleCount();
         if (slotId < 0 || slotId >= tupleCount) {return false;}
         if (isDeleted(slotId)) {return false;}
 
-        if (newTuple == null || newTuple.getData() == null) {throw new IllegalArgumentException("tuple is null");}
+        if (newTuple == null || newTuple.getPageData() == null) {throw new IllegalArgumentException("tuple is null");}
         if (newTuple.getSize() == 0) {throw new IllegalArgumentException("tuple is empty");}
         if (newTuple.getSize() > getTupleSize(slotId)) {
             logger.warn("Update Failed: new tuple size {} > old tuple size {}", newTuple.getSize(), getTupleSize(slotId));
@@ -138,7 +135,7 @@ public class TablePage {
 
         int tupleOffset = getTupleOffset(slotId);
         ByteBuffer buffer = page.getPageData();
-        byte[] data = newTuple.getData();
+        byte[] data = newTuple.getPageData();
         for (int i = 0; i< newTuple.getSize(); i++) {
             buffer.put(tupleOffset + i, data[i]);
         }
@@ -151,7 +148,7 @@ public class TablePage {
         return true;
     }
 
-    public int deleteTuple(Tuple tuple) {
+    public void deleteTuple(short slotId) {
         if (tuple == null || tuple.getRecordId() == null) {return -1;}
         RecordId rid = tuple.getRecordId();
         if (rid.getPageId() != getPageId()) {return -1;}
@@ -162,22 +159,6 @@ public class TablePage {
     // Getter and Setter
     public int getPageId() {
         return page.getPageData().getInt(OFFSET_PAGE_ID);
-    }
-
-    public int getPrevPageId() {
-        return page.getPageData().getInt(OFFSET_PREV_PAGE_ID);
-    }
-
-    public void setPrevPageId(int prevPageId) {
-        page.getPageData().putInt(OFFSET_PREV_PAGE_ID, prevPageId);
-    }
-
-    public int getNextPageId() {
-        return page.getPageData().getInt(OFFSET_NEXT_PAGE_ID);
-    }
-
-    public void setNextPageId(int nextPageId) {
-        page.getPageData().putInt(OFFSET_NEXT_PAGE_ID, nextPageId);
     }
 
     private int getFreeSpacePointer() {

@@ -1,4 +1,4 @@
-package com.hunkyhsu.minidb.type;
+package com.hunkyhsu.minidb.metadata;
 
 import java.nio.ByteBuffer;
 

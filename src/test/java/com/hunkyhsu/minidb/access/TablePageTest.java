@@ -1,11 +1,13 @@
-package com.hunkyhsu.minidb.tuple;
+package com.hunkyhsu.minidb.access;
 
-import com.hunkyhsu.minidb.schema.Column;
-import com.hunkyhsu.minidb.schema.Schema;
+import com.hunkyhsu.minidb.access.heap.TablePage;
+import com.hunkyhsu.minidb.access.heap.Tuple;
+import com.hunkyhsu.minidb.metadata.schema.Column;
+import com.hunkyhsu.minidb.metadata.schema.Schema;
 import com.hunkyhsu.minidb.storage.Page;
-import com.hunkyhsu.minidb.type.TypeId;
-import com.hunkyhsu.minidb.type.Value;
-import com.hunkyhsu.minidb.type.VarcharType;
+import com.hunkyhsu.minidb.metadata.TypeId;
+import com.hunkyhsu.minidb.metadata.Value;
+import com.hunkyhsu.minidb.metadata.VarcharType;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -52,11 +54,11 @@ class TablePageTest {
     void insertAndGetRoundTrip() {
         TablePage tablePage = newTablePage(1);
         Schema schema = varcharSchema(100, false);
-        int slotId = tablePage.insertTuple(tupleOf(schema, "hello"));
+        int slotId = tablePage.insertTuple(, tupleOf(schema, "hello"), );
         assertEquals(0, slotId);
         assertEquals(1, tablePage.getTupleCount());
 
-        Tuple tuple = tablePage.getTuple(slotId, schema);
+        Tuple tuple = tablePage.getTuple(slotId, , schema);
         assertNotNull(tuple);
         assertEquals(1, tuple.getRecordId().getPageId());
         assertEquals(slotId, tuple.getRecordId().getSlotId());
@@ -67,12 +69,12 @@ class TablePageTest {
     void updateTupleSmallerSucceeds() {
         TablePage tablePage = newTablePage(2);
         Schema schema = varcharSchema(100, false);
-        int slotId = tablePage.insertTuple(tupleOf(schema, "abcdef"));
+        int slotId = tablePage.insertTuple(, tupleOf(schema, "abcdef"), );
 
         Tuple newTuple = tupleOf(schema, "abc");
         assertTrue(tablePage.updateTuple(newTuple, slotId));
 
-        Tuple updated = tablePage.getTuple(slotId, schema);
+        Tuple updated = tablePage.getTuple(slotId, , schema);
         assertNotNull(updated);
         assertEquals("abc", updated.getValue(0).asVarchar());
     }
@@ -81,12 +83,12 @@ class TablePageTest {
     void updateTupleLargerFailsAndKeepsData() {
         TablePage tablePage = newTablePage(2);
         Schema schema = varcharSchema(100, false);
-        int slotId = tablePage.insertTuple(tupleOf(schema, "abc"));
+        int slotId = tablePage.insertTuple(, tupleOf(schema, "abc"), );
 
         Tuple larger = tupleOf(schema, "abcd");
         assertFalse(tablePage.updateTuple(larger, slotId));
 
-        Tuple updated = tablePage.getTuple(slotId, schema);
+        Tuple updated = tablePage.getTuple(slotId, , schema);
         assertNotNull(updated);
         assertEquals("abc", updated.getValue(0).asVarchar());
     }
@@ -95,9 +97,9 @@ class TablePageTest {
     void markDeletedHidesTuple() {
         TablePage tablePage = newTablePage(4);
         Schema schema = varcharSchema(100, false);
-        int slotId = tablePage.insertTuple(tupleOf(schema, "row"));
+        int slotId = tablePage.insertTuple(, tupleOf(schema, "row"), );
         assertTrue(tablePage.markDeleted(slotId));
-        assertNull(tablePage.getTuple(slotId, schema));
+        assertNull(tablePage.getTuple(slotId, , schema));
         assertFalse(tablePage.updateTuple(tupleOf(schema, "new"), slotId));
     }
 
@@ -105,26 +107,26 @@ class TablePageTest {
     void deleteTupleUsesRecordId() {
         TablePage tablePage = newTablePage(5);
         Schema schema = varcharSchema(100, false);
-        int slotId = tablePage.insertTuple(tupleOf(schema, "row"));
+        int slotId = tablePage.insertTuple(, tupleOf(schema, "row"), );
 
-        Tuple tuple = tablePage.getTuple(slotId, schema);
+        Tuple tuple = tablePage.getTuple(slotId, , schema);
         assertNotNull(tuple);
         assertEquals(slotId, tablePage.deleteTuple(tuple));
-        assertNull(tablePage.getTuple(slotId, schema));
+        assertNull(tablePage.getTuple(slotId, , schema));
     }
 
     @Test
     void slotsAreNotReusedAfterDelete() {
         TablePage tablePage = newTablePage(6);
         Schema schema = varcharSchema(100, false);
-        int slotId0 = tablePage.insertTuple(tupleOf(schema, "a"));
+        int slotId0 = tablePage.insertTuple(, tupleOf(schema, "a"), );
         assertTrue(tablePage.markDeleted(slotId0));
 
-        int slotId1 = tablePage.insertTuple(tupleOf(schema, "b"));
+        int slotId1 = tablePage.insertTuple(, tupleOf(schema, "b"), );
         assertEquals(1, slotId1);
         assertEquals(2, tablePage.getTupleCount());
-        assertNull(tablePage.getTuple(slotId0, schema));
-        assertNotNull(tablePage.getTuple(slotId1, schema));
+        assertNull(tablePage.getTuple(slotId0, , schema));
+        assertNotNull(tablePage.getTuple(slotId1, , schema));
     }
 
     @Test
@@ -132,6 +134,6 @@ class TablePageTest {
         TablePage tablePage = newTablePage(7);
         Schema schema = varcharSchema(Page.PAGE_SIZE, false);
         String tooLarge = stringOf('x', Page.PAGE_SIZE);
-        assertThrows(IllegalArgumentException.class, () -> tablePage.insertTuple(tupleOf(schema, tooLarge)));
+        assertThrows(IllegalArgumentException.class, () -> tablePage.insertTuple(, tupleOf(schema, tooLarge), ));
     }
 }

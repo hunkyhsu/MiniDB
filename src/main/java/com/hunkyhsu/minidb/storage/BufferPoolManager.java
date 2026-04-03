@@ -160,8 +160,7 @@ public class BufferPoolManager implements Closeable {
             int frameId = findVictimFrame();
             if (frameId == -1) {
                 // 分配失败，回滚磁盘分配
-                // TODO: 实现 deallocatePage 时取消注释
-                // diskManager.deallocatePage(newPageId);
+                diskManager.deallocatePage(newPageId);
                 throw new IOException("All pages are pinned, cannot create new page");
             }
 
@@ -204,6 +203,7 @@ public class BufferPoolManager implements Closeable {
                 logger.warn("Cannot delete page {} (pinCount={})", pageId, page.getPinCount());
                 return false;
             }
+
             // 从 PageTable 和 Replacer 中移除
             pageTable.remove(pageId);
             replacer.pin(frameId);
@@ -211,7 +211,10 @@ public class BufferPoolManager implements Closeable {
             page.setPageId(-1);
             freeList.offer(frameId);
 
-            logger.info("Deleted page {} (frameId={})", pageId, frameId);
+            // 将页面加入 DiskManager 的 FreePageList
+            diskManager.deallocatePage(pageId);
+
+            logger.info("Deleted page {} (frameId={}, added to FreePageList)", pageId, frameId);
             return true;
 
         } finally {

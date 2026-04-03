@@ -1,6 +1,6 @@
-package com.hunkyhsu.minidb.schema;
+package com.hunkyhsu.minidb.metadata.schema;
 
-import com.hunkyhsu.minidb.type.Type;
+import com.hunkyhsu.minidb.metadata.Type;
 import lombok.Getter;
 
 

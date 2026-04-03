@@ -1,6 +1,7 @@
-package com.hunkyhsu.minidb.tuple;
+package com.hunkyhsu.minidb.access.heap;
 
-import com.hunkyhsu.minidb.schema.Schema;
+import com.hunkyhsu.minidb.access.record.RecordId;
+import com.hunkyhsu.minidb.metadata.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.Page;
 import lombok.Getter;
@@ -95,7 +96,7 @@ public class TableHeap {
             Page lastPage = bufferPoolManager.fetchPage(lastPageId);
             if (lastPage == null) {throw new IllegalArgumentException("lastPage is null");}
             TablePage tablePage = new TablePage(lastPage);
-            int slotId = tablePage.insertTuple(tuple);
+            int slotId = tablePage.insertTuple(, tuple, );
             // case 1: insert success
             if (slotId != -1) {
                 RecordId rid = new RecordId(lastPageId, slotId);
@@ -112,7 +113,7 @@ public class TableHeap {
             newTablePage.init(newPageId, lastPageId);
             tablePage.setNextPageId(newPageId);
 
-            int newSlotId = newTablePage.insertTuple(tuple);
+            int newSlotId = newTablePage.insertTuple(, tuple, );
             RecordId rid = new RecordId(newPageId, newSlotId);
             tuple.setRecordId(rid);
             this.lastPageId = newPageId;
@@ -132,7 +133,7 @@ public class TableHeap {
         try {
             Page page = bufferPoolManager.fetchPage(recordId.getPageId());
             TablePage tablePage = new TablePage(page);
-            Tuple tuple = tablePage.getTuple(recordId.getSlotId(), schema);
+            Tuple tuple = tablePage.getTuple(recordId.getSlotId(), , schema);
             bufferPoolManager.unpinPage(recordId.getPageId(), false);
             return tuple;
         } catch (IOException e) {

@@ -1,12 +1,16 @@
-package com.hunkyhsu.minidb.tuple;
+package com.hunkyhsu.minidb.access;
 
-import com.hunkyhsu.minidb.schema.Column;
-import com.hunkyhsu.minidb.schema.Schema;
+import com.hunkyhsu.minidb.access.heap.TableHeap;
+import com.hunkyhsu.minidb.access.heap.TableIterator;
+import com.hunkyhsu.minidb.access.heap.Tuple;
+import com.hunkyhsu.minidb.access.record.RecordId;
+import com.hunkyhsu.minidb.metadata.schema.Column;
+import com.hunkyhsu.minidb.metadata.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.DiskManager;
-import com.hunkyhsu.minidb.type.TypeId;
-import com.hunkyhsu.minidb.type.Value;
-import com.hunkyhsu.minidb.type.VarcharType;
+import com.hunkyhsu.minidb.metadata.TypeId;
+import com.hunkyhsu.minidb.metadata.Value;
+import com.hunkyhsu.minidb.metadata.VarcharType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

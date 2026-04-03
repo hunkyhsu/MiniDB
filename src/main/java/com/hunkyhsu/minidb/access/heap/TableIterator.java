@@ -1,6 +1,6 @@
-package com.hunkyhsu.minidb.tuple;
+package com.hunkyhsu.minidb.access.heap;
 
-import com.hunkyhsu.minidb.schema.Schema;
+import com.hunkyhsu.minidb.metadata.schema.Schema;
 import com.hunkyhsu.minidb.storage.BufferPoolManager;
 import com.hunkyhsu.minidb.storage.Page;
 import org.slf4j.Logger;
@@ -41,7 +41,7 @@ public class TableIterator implements Iterator<Tuple> {
 
                 // range all the slot in current page
                 while (currentSlotId < tupleCount) {
-                    Tuple tuple = tablePage.getTuple(currentSlotId, schema);
+                    Tuple tuple = tablePage.getTuple(currentSlotId, , schema);
                     currentSlotId++;
                     if (tuple != null) {
                         bufferPoolManager.unpinPage(currentPageId, false);

@@ -31,18 +31,14 @@ public class LRUReplacer implements Replacer {
     private final ReentrantLock lock;
 
     public LRUReplacer(int capacity) {
-        // 每次 get/put 都会将元素移到末尾
         this.lruMap = new LinkedHashMap<>(capacity, 0.75f, true);
         this.lock = new ReentrantLock();
         logger.info("LRU Replacer initialized with capacity {}", capacity);
     }
 
     /**
-     * 选择一个 Frame 进行淘汰
-     *
-     * 实现：返回 LinkedHashMap 的第一个元素（最久未使用）
-     *
-     * @return Frame ID，如果没有可淘汰的 Frame 则返回 -1
+     * Get 1st frame from LinkedHashMap (LRU) and victim it
+     * @return Frame ID or -1 if no victim
      */
     @Override
     public int victim() {
@@ -52,11 +48,9 @@ public class LRUReplacer implements Replacer {
             if (it.hasNext()) {
                 int frameId = it.next().getKey();
                 it.remove();
-
                 logger.debug("Victim selected: frameId={}", frameId);
                 return frameId;
             }
-
             logger.debug("No victim available (all frames are pinned)");
             return -1;
 
@@ -66,6 +60,7 @@ public class LRUReplacer implements Replacer {
     }
 
     /**
+     * Mark the frame as non-removable and
      * 将 Frame 标记为不可淘汰（被 pin 住）
      *
      * 实现：从 LRU 列表中移除
