@@ -105,7 +105,9 @@ trim() {
   printf "%s" "${1}" | tr -d '[:space:]'
 }
 
-scriptDir="$(dirname "$0")"
+scriptDir="$(
+  CDPATH='' cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P
+)"
 scriptName="$(basename "$0")"
 
 # parse distributionUrl and optional distributionSha256Sum, requires .mvn/wrapper/maven-wrapper.properties

@@ -1,0 +1,4 @@
+engine:
+  db-path: ./data/minidb.dat
+  file-size: 104857600
+  max-transactions: 100000

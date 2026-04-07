@@ -49,11 +49,13 @@ $ErrorActionPreference = "Stop"
 if ($env:MVNW_VERBOSE -eq "true") {
   $VerbosePreference = "Continue"
 }
+$scriptDir = (Get-Item -LiteralPath $scriptDir).FullName
+$wrapperPropertiesPath = Join-Path $scriptDir ".mvn/wrapper/maven-wrapper.properties"
 
 # calculate distributionUrl, requires .mvn/wrapper/maven-wrapper.properties
-$distributionUrl = (Get-Content -Raw "$scriptDir/.mvn/wrapper/maven-wrapper.properties" | ConvertFrom-StringData).distributionUrl
+$distributionUrl = (Get-Content -Raw $wrapperPropertiesPath | ConvertFrom-StringData).distributionUrl
 if (!$distributionUrl) {
-  Write-Error "cannot read distributionUrl property in $scriptDir/.mvn/wrapper/maven-wrapper.properties"
+  Write-Error "cannot read distributionUrl property in $wrapperPropertiesPath"
 }
 
 switch -wildcard -casesensitive ( $($distributionUrl -replace '^.*/','') ) {
@@ -135,7 +137,7 @@ if ($env:MVNW_USERNAME -and $env:MVNW_PASSWORD) {
 $webclient.DownloadFile($distributionUrl, "$TMP_DOWNLOAD_DIR/$distributionUrlName") | Out-Null
 
 # If specified, validate the SHA-256 sum of the Maven distribution zip file
-$distributionSha256Sum = (Get-Content -Raw "$scriptDir/.mvn/wrapper/maven-wrapper.properties" | ConvertFrom-StringData).distributionSha256Sum
+$distributionSha256Sum = (Get-Content -Raw $wrapperPropertiesPath | ConvertFrom-StringData).distributionSha256Sum
 if ($distributionSha256Sum) {
   if ($USE_MVND) {
     Write-Error "Checksum validation is not supported for maven-mvnd. `nPlease disable validation by removing 'distributionSha256Sum' from your maven-wrapper.properties."
@@ -149,7 +151,7 @@ if ($distributionSha256Sum) {
 # unzip and move
 Expand-Archive "$TMP_DOWNLOAD_DIR/$distributionUrlName" -DestinationPath "$TMP_DOWNLOAD_DIR" | Out-Null
 
-# Find the actual extracted directory name (handles snapshots where dbFilePath != directory name)
+# Find the actual extracted directory name (handles snapshots where filename != directory name)
 $actualDistributionDir = ""
 
 # First try the expected directory name (for regular distributions)

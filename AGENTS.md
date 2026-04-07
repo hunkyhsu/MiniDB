@@ -67,3 +67,7 @@ For each refactor batch, agents should ensure:
 - Visibility logic is testable independently from operators.
 - Operators are iterator-based and pointer-driven.
 - Verification includes compile/test checks plus targeted MVCC visibility tests.
+
+## Session Constraints From User
+- Do not run any tests. The user will run tests manually.
+- Keep all commands and file operations within `~/IdeaProjects/minidb` only.

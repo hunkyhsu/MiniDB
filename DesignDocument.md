@@ -138,7 +138,7 @@ Protocols and Interfaces:
 
 Resource Constraints:
 
-Page Size: Fixed at 4KB (4096 Bytes), aligned with the page size of most operating systems and the physical sectors of SSDs.
+Page Size: Fixed at 4KB (4096 Bytes), aligned with the page fixedSize of most operating systems and the physical sectors of SSDs.
 
 Buffer Pool Size: Configurable; the system starts with a small memory footprint (e.g., 1024 pages, or 4MB) to ensure smooth operation and debugging on any ordinary laptop.
 
@@ -401,7 +401,7 @@ Here is the brief description of the core methods of `page`:
 - **Page I/O**: Read and write 4KB pages to/from disk using Java NIO `FileChannel`.
 - **Page Allocation**: Allocate new pages using Extent-Based Allocation strategy.
 - **Page Deallocation**: Manage freed pages via FreePageList for reuse.
-- **Multi-File Management**: Support multiple database files to overcome single-file size limits.
+- **Multi-File Management**: Support multiple database files to overcome single-file fixedSize limits.
 - **Space Management**: Track total pages, free pages, and preallocated pages.
 
 **Data Structures**:
@@ -530,7 +530,7 @@ allocatePage() #9:
 - Each FileChannel corresponds to exactly one database file
 - `freePages` contains only valid pageIds within `[0, numPages)`
 - `preallocatedPages` contains only pages that have been physically allocated on disk
-- File size is always a multiple of `PAGE_SIZE` (4096 bytes)
+- File fixedSize is always a multiple of `PAGE_SIZE` (4096 bytes)
 - `fileIndex` for a given `pageId` is deterministic: `pageId / MAX_PAGES_PER_FILE`
 
 **Error Semantics**:
@@ -568,7 +568,7 @@ Here is the definition of the interface:
 - `int victim()`: Choose a frame and evict it.
 - `void pin(int framId)`: Mark a frame as unevictable.
 - `void unpin(int frameId)`: Mark a frame as evictable.
-- `int size()`: indicate the number of evictable frames.
+- `int fixedSize()`: indicate the number of evictable frames.
 
 As for LRU Replacer, it implements LRU replacement strategy in O(1) complexity because of LinkedHashMap's accessOrder.
 
@@ -620,7 +620,7 @@ Here is the brief description of the core methods of `page`:
 
 - `deletePage(pageId)`: Returns `false` if the page is not in the buffer; returns `false` if it is pinned; Otherwise, removes the mapping, removes it from the Replacer, resets the page, and puts it back into the `freeList`, returning `true`.
 
-- `getStats()`: Returns the buffer pool status string, including `poolSize`, used/free size, dirty pages, pinned pages, and the number of evictables.
+- `getStats()`: Returns the buffer pool status string, including `poolSize`, used/free fixedSize, dirty pages, pinned pages, and the number of evictables.
 
 - `close()`: Cleans up the `pageTable` and `freeList` after `flushAllPages()`.
 
@@ -635,7 +635,7 @@ Here is the brief description of the core methods of `page`:
 - `pageId` from `pageTable` keeps the same with `pages[frameId].pageId`.
 - The frame in `freeList` is out of `pageTable`.
 - Only the frame meets `pinCount == 0` would be in LRU Replacer.
-- The amount of evictable frame equals `replacer.size()`.
+- The amount of evictable frame equals `replacer.fixedSize()`.
 
 **Error Semantics**:
 
@@ -652,7 +652,7 @@ Here is the brief description of the core methods of `page`:
 
 ### 8.1 Overview
 
-**Responsibility**: The Access Layer is the storage-facing data access subsystem of MiniDB. It is responsible for converting raw fixed-size pages provided by the Storage Layer into structured database records and searchable access paths. This layer defines the physical layout of tuples and index entries, manages page-local and relation-level data organization, and exposes stable row-oriented and index-oriented APIs to the upper layers. 
+**Responsibility**: The Access Layer is the storage-facing data access subsystem of MiniDB. It is responsible for converting raw fixed-fixedSize pages provided by the Storage Layer into structured database records and searchable access paths. This layer defines the physical layout of tuples and index entries, manages page-local and relation-level data organization, and exposes stable row-oriented and index-oriented APIs to the upper layers. 
 
 The Access Layer sits between the Storage Layer and the Query Processing / Transaction layers.
 
